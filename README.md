@@ -352,6 +352,26 @@ RegFeiMsb	0x22	Старший байт FEI	Знаковое число
 RegFeiLsb	0x23	Младший байт FEI	
 
 
+
+### Компилятор, линковщик, полезные функции
+
+Проверить, используется ли функция printf в файле Build/app.elf
+```bash
+arm-none-eabi-nm Build/app.elf | grep printf
+```
+
+Посмотреть занимаеый размер в файле Build/app.elf
+```bash
+arm-none-eabi-nm -S --size-sort Build/app.elf | tail -20
+
+# посмотреть занимаеый размер секций
+arm-none-eabi-size -A Build/app.elf
+
+#посмотреть информацию в хидере файла
+readelf -h Build/app.elf
+```
+
+
 ## Ссылки
 1. Кастомизация OpenOCD для прошивки MCU HC32L110 от [Spritetm](https://github.com/Spritetm/openocd-hc32l110)
 2. Сборка тулчейна для разработки по MCU от [Spritetm](https://github.com/Spritetm/hc32l110-gcc-sdk)
@@ -360,3 +380,4 @@ RegFeiLsb	0x23	Младший байт FEI
 5. Несколько SDK под MCU типа H32 от [Edragon](https://github.com/Edragon/MCU-HDSC-SDK)
 6. Описание процедуры разблокировки MCU на форуме [eevblog](https://www.eevblog.com/forum/microcontrollers/hc32l110-complete-erase/msg5037478/#msg5037478) и китайский форум [21ic](https://bbs.21ic.com/icview-2766190-2-1.html)
 7. Библиотека для управления SX1278 от [dernasherbrezon](https://components.espressif.com/components/dernasherbrezon/sx127x/versions/5.0.1/readme) и на [github](https://github.com/dernasherbrezon/sx127x)
+8. [Введение в ELF-файлы в Linux: понимание и анализ](https://habr.com/ru/articles/480642/)

@@ -1,35 +1,125 @@
 /**
- * LED Blink Demo
+ * Управлением радиочипом SX1278 на плате E32 170T30D для приема AIS сигнала
  * 
- * Wiring:
- *   P34   -> + LED1 -  -> GND
- *   P35   -> + LED2 -  -> GND
+ * Для отладки используется порт UART1 MCU Rx->M0, Tx->M1
+ * 
+ * Радиочип SX1278 подключен через SPI
+ * 
+ * 
+ Распиновка
+| MCU (pin)| функция SPI  | SX1278 (pin) |
+| -------- | ------------ | ----------- |
+| P1.4   | SPI CS (NSS) | NSS    |
+| P2.3   | SPI MISO     | MISO   |
+| P2.4   | SPI MOSI     | MOSI   |
+| P1.5   | SPI SCK      | SCK    |
+
+| MCU (pin)   | SX1278 (pin) |
+| ------ | ------ |
+| P3.2   | RESET  |
+
+| Режим | P3.3 () | P3.4 () | Комментарий      |
+| ----- | ------- | ------- | ---------------- |
+| RX    | 0       | 1      | Пин P3.3 низкий/P3.4 высокий для приёма   |
+| TX    | 1       | 0      | Пин P3.3 высокий/P3.4 низкий для передачи |
+| Sleep | 0       | 0      | Оба пина низкие — модуль в сон            |
+
 */
 #include "gpio.h"
+#include "ulog.h"
+#include "sx1278.h"
+
+#define TAG "AIS"
+
+
+/* Определяем пины управления питанием LNA и PA через константы */
+#define ON_OFF_POWER_PAUSE_MS 20 //время на стабилизацию/переключение LDO
+typedef struct {
+    uint8_t port;
+    uint8_t pin;
+} gpio_pin_t;
+
+static const gpio_pin_t P_TX_CTRL = {3, 3}; // P3.3
+static const gpio_pin_t P_RX_CTRL  = {3, 4}; // P3.4
+
+//флаг инициализации портов для управления питанием LNA/PA и тп
+static boolean_t is_ports_init = FALSE;
+
+/**
+ * Выключает источники питания LNA и PA
+ */
+en_result_t power_tx_rx_off() {
+    GPIO_SetPinOutLow(P_TX_CTRL.port, P_TX_CTRL.pin);
+    GPIO_SetPinOutLow(P_RX_CTRL.port,  P_RX_CTRL.pin);
+    delay1ms(ON_OFF_POWER_PAUSE_MS); // подождать стабилизации LDO
+
+    return Ok;
+}
+
+
+/**
+ * Инициализация пинов управления LNA/PA
+ */
+static void power_ctrl_init(void) {
+    if (is_ports_init) {
+        return;
+    }
+    Gpio_InitIOExt(P_TX_CTRL.port, P_TX_CTRL.pin, GpioDirOut, FALSE, FALSE, FALSE, FALSE);
+    Gpio_InitIOExt(P_RX_CTRL.port, P_RX_CTRL.pin,  GpioDirOut, FALSE, FALSE, FALSE, FALSE);
+    //переводим в Sleep явно
+    power_tx_rx_off(); 
+    
+    is_ports_init = TRUE;
+}
+
+
+/**
+ * Включает режим Rx, LNA для приема
+ */
+en_result_t power_rx_on() {
+    // Переход в безопасный режим Sleep
+    power_tx_rx_off();
+
+    // RX: PA выключен, LNA включен
+    GPIO_SetPinOutLow(P_TX_CTRL.port, P_TX_CTRL.pin); //перестраховка
+    GPIO_SetPinOutHigh(P_RX_CTRL.port, P_RX_CTRL.pin);
+    delay1ms(ON_OFF_POWER_PAUSE_MS); // подождать стабилизации LDO
+    
+    return Ok;
+}
+
+
+/**
+ * Базовый сценарий инициализации приема
+ */
+en_result_t init() {
+    //выключаем питание LNA/PA
+    power_ctrl_init();
+    power_tx_rx_off();
+
+    return sx1278_init_rx_ais(rx_mode_packet, AIS_FREQ_LOWER_HZ);
+}
+
 
 int main(void) {
-    /**
-     * Set P34 and P35 as output
-    */
-    
-    Gpio_InitIOExt(3, 4, 
-                    GpioDirOut, // Output
-                    FALSE,      // No pull up
-                    FALSE,      // No pull down
-                    FALSE,      // No open drain
-                    FALSE);     // High driver capability
-    Gpio_InitIOExt(3, 5, GpioDirOut, FALSE, FALSE, FALSE, FALSE);
+    power_ctrl_init();
 
-    // Toggle LED blink
-    while (1)
-    {
-        GPIO_SetPinOutHigh(3, 4);
-        GPIO_SetPinOutLow(3, 5);
-        delay1ms(1000);
+    en_result_t res = init_ulog();
+    LOGI(TAG, res);
 
-        GPIO_SetPinOutLow(3, 4);
-        GPIO_SetPinOutHigh(3, 5);
+    res = init();
+    if (Ok != res) {
+        LOGE(TAG, res);
+        log_write_str("Error init!");
+        return 1;
+    }
+    LOGI(TAG, res);
+
+
+    while(TRUE) {
+
         delay1ms(1000);
     }
+    return 0;
 }
 
