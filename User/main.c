@@ -107,19 +107,60 @@ int main(void) {
     en_result_t res = init_ulog();
     LOGI(TAG, res);
 
+    //узнаем частоту работы MCU
+    log_write_u32(Clk_GetHClkFreq());
+    //узнаем частоту работы периферии для SPI, UART, Timer, I2C 
+    log_write_u32(Clk_GetPClkFreq());
+
     res = init();
     if (Ok != res) {
         LOGE(TAG, res);
-        log_write_str("Error init!");
+        log_write_str("Un-init");
         return 1;
     }
+
+    //включаем питание LNA и переключаем ВЧ-ключ на прием
+    res = power_rx_on();
+    log_write_str("Rx on");
     LOGI(TAG, res);
 
+    
+    uint8_t buff[FIXED_PACKET_LEN] = {0};
+    uint16_t const buff_len = sizeof(buff);
 
     while(TRUE) {
+        uint16_t read_bytes = 0;
+        res = sx1278_read_packet(buff, buff_len, &read_bytes);
 
-        delay1ms(1000);
+        while (Ok != res) {
+            //обнуляем кол-во прочитанных байт
+            read_bytes = 0;
+            //явно сбрасываем радиочип
+            sx1278_reset();
+            //пробуем еще раз инициализировать
+            res = sx1278_init_rx_ais(rx_mode_packet, AIS_FREQ_LOWER_HZ);
+            if (Ok != res) {
+                LOGE(TAG, res);
+                delay1ms(5*1000);
+            }
+            else {
+                //вернемся к попытке чтения принятых данных из радиочипа
+                break;
+            }
+        }
+        //передаем/обрабатываем принятые байты
+        //TODO сколько времени это занимает, не успеет ли переполниться FIFO?
+        log_write_char('\r');
+        log_write_char('\n');
+        for (uint16_t i = 0; i < read_bytes; i++) {
+            log_write_hex(buff[i]);
+        }
+        log_write_char('\r');
+        log_write_char('\n');
+        //delay1ms(1000);
     }
+    
+    power_tx_rx_off(); 
     return 0;
 }
 
