@@ -108,9 +108,9 @@ int main(void) {
     LOGI(TAG, res);
 
     //узнаем частоту работы MCU
-    log_write_u32(Clk_GetHClkFreq());
+    LOGI(TAG, Clk_GetHClkFreq()/1000000);
     //узнаем частоту работы периферии для SPI, UART, Timer, I2C 
-    log_write_u32(Clk_GetPClkFreq());
+    LOGI(TAG, Clk_GetPClkFreq()/1000000);
 
     res = init();
     if (Ok != res) {

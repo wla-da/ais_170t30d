@@ -47,6 +47,7 @@
 #define REG_PACKET_CONFIG2       0x31
 #define REG_PAYLOAD_LENGTH       0x32
 #define REG_FIFO_THRESH          0x35
+#define REG_IRQ_FLAGS1           0x3E
 #define REG_IRQ_FLAGS2           0x3F
 #define REG_VERSION              0x42
 
@@ -56,6 +57,7 @@
 #define SPI_WRITE_BIT          (1U << 7U)  /* MSB=1 для записи */
 #define SPI_READ_MASK          0x7FU       /* MSB=0 для чтения */
 
+#define IRQ1_MODE_READY         (1 << 7) //Set when the operation mode requested in Mode, is ready
 // Биты флагов в REG_IRQ_FLAGS2
 #define IRQ2_PAYLOAD_READY       (1 << 2)   // Пакет принят
 #define IRQ2_FIFO_OVERRUN        (1 << 4)   // Переполнение FIFO
@@ -70,12 +72,18 @@
 #define REG_PLL_LF               0x70
 
 // Биты режимов работы чипа
-#define OP_MODE_LONGRANGE_MASK   0x00
+/*
+0 FSK/OOK Mode/1 LoRa Mode
+This bit can be modified only in Sleep mode. A write operation on
+other device modes is ignored.
+*/
+#define OP_MODE_LONG_RANGE_MODE (1 << 7) //0 FSK or OOK Mode/1 LoRa Mode
 #define OP_MODE_MODULATION_FSK_MASK   0x00
 #define OP_MODE_LOW_FREQ_ON      (1 << 3) //1 Low Frequency Mode (access to LF test registers)/0 High Frequency Mode (access to HF test registers)
 #define OP_MODE_SLEEP            0x00
 #define OP_MODE_STDBY            0x01
 #define OP_MODE_RX               0x05
+#define OP_MODE_MASK             ((1 << 2) | (1 << 1) | 1) //маска b111 для определения режима чипа
 
 #define AFC_AUTO_ON_BIT          (1 << 4) //0 No AFC performed at receiver startup/1 AFC is performed at each receiver startup
 #define AGC_AUTO_ON_BIT          (1 << 3) //0 LNA gain forced by the LnaGain Setting/1 LNA gain is controlled by the AGC
@@ -107,6 +115,8 @@
 #define PACKET_MODE_BIT          (1 << 6) //0 Continuous mode/1 Packet mode
 #define SYNC_WORD_ON_BIT         (1 << 4) //Enables the Sync word generation and detection: 0 Off/1 On
 
+#define MAX_MODE_READY_COUNTER 1000 //максимальное значения счетчика ожидания флага готовности состояния в REG_IRQ_FLAGS1
+
 
 //значения мантиссы и экспоненты для регистра RegRxBw для настройки FIR, см детали 3.5.6. Channel Filter
 static const uint16_t MANT_VALUES[] = {16, 20, 24};
@@ -133,7 +143,7 @@ static boolean_t is_reset_pin_init = FALSE;
 
 
 /* ---------------- Вспомогательные функции ---------------- */
-static en_result_t reset_init() {
+static en_result_t sx1278_reset_init() {
     if (is_reset_pin_init) {
         //ранее SPI был уже инициализирован
         return Ok;
@@ -189,10 +199,10 @@ static en_result_t sx1278_spi_init() {
 static void sx1278_write_reg(uint8_t addr, uint8_t val)
 {
     SPI_SetCsLow();
-    __NOP(); __NOP();
+    __NOP(); __NOP(); __NOP(); __NOP();
     Spi_TxRx(addr | SPI_WRITE_BIT);  // MSB=1 -> запись
     Spi_TxRx(val);
-    __NOP(); __NOP();
+    __NOP(); __NOP(); __NOP(); __NOP();
     SPI_SetCsHigh();
 }
 
@@ -202,10 +212,10 @@ static uint8_t sx1278_read_reg(uint8_t addr)
 {
     uint8_t val;
     SPI_SetCsLow();
-    __NOP(); __NOP();
+    __NOP(); __NOP(); __NOP(); __NOP();
     Spi_TxRx(addr & SPI_READ_MASK); // MSB=0 -> чтение
     val = Spi_TxRx(0x00);
-    __NOP(); __NOP();
+    __NOP(); __NOP(); __NOP(); __NOP();
     SPI_SetCsHigh();
     return val;
 }
@@ -213,7 +223,30 @@ static uint8_t sx1278_read_reg(uint8_t addr)
 static en_result_t sx1278_write_reg_safe(uint8_t addr, uint8_t val) {
     sx1278_write_reg(addr, val);
     //TODO нужно ли делать задержку перед чтением регистра?
-    return (sx1278_read_reg(addr) == val) ? Ok : ErrorUninitialized;
+    __NOP(); __NOP(); __NOP(); __NOP();
+    return (sx1278_read_reg(addr) & val) ? Ok : ErrorUninitialized;
+}
+
+
+/**
+ * Ожидаем появления флага IRQ1_MODE_READY в регистре REG_IRQ_FLAGS1
+ * Свидетельствует, что чип перешел в нужное состояние:
+ * - Sleep: Entering Sleep mode
+ * - Standby: XO is running
+ * - FS: PLL is locked
+ * - Rx: RSSI sampling starts
+ * - Tx: PA ramp-up completed
+ */
+static en_result_t sx1278_wait_mode_ready() {
+    uint32_t wait_counter = 0;
+    while(!(IRQ1_MODE_READY & sx1278_read_reg(REG_IRQ_FLAGS1))) {
+        //__NOP(); __NOP(); __NOP(); __NOP();
+        delay1ms(1); //TODO возможно многовато времени, можно перевести на цикл из __NOP()
+        if (++wait_counter > MAX_MODE_READY_COUNTER) {
+            return ErrorNotReady;
+        }
+    }
+    return Ok;
 }
 
 static en_result_t sx1278_set_frequency(uint32_t frequency_hz)
@@ -284,7 +317,7 @@ static en_result_t sx1278_init_packet_mode(void)
     */
     uint8_t sync_word_len = sizeof(SYNC_WORD);
     uint8_t sync_size = sync_word_len - 1; //на один байт меньше размера синхрослова для ioHomeOn=0
-    res = sx1278_write_reg_safe(REG_SYNC_CONFIG, SYNC_WORD_ON_BIT | sync_size);
+    sx1278_write_reg_safe(REG_SYNC_CONFIG, SYNC_WORD_ON_BIT | sync_size);
     if (res != Ok) {
         return res;
     }
@@ -415,7 +448,7 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
         
     en_result_t res;
     /* 0. Сброс чипа */
-    if (Ok != (res = reset_init())) {
+    if (Ok != (res = sx1278_reset_init())) {
         LOGE(TAG, res);
         return ErrorUninitialized;       
     }
@@ -431,22 +464,39 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
         return ErrorUninitialized;
     }
 
-    uint8_t ver;
-    if (SX1278_VERSION != (ver = sx1278_read_reg(REG_VERSION))) {
-        LOGE(TAG, ver);
+    uint8_t val;
+    if (SX1278_VERSION != (val = sx1278_read_reg(REG_VERSION))) {
+        LOGE(TAG, val);
         return ErrorUninitialized; 
     }
     LOGI(TAG, 1);
 
     /* 2. софт ресет радиочипа через погружение в сон */
-    if (Ok != (res = sx1278_write_reg_safe(REG_OP_MODE, OP_MODE_SLEEP))) {
+    sx1278_write_reg(REG_OP_MODE, OP_MODE_SLEEP);
+    if (Ok != (res = sx1278_wait_mode_ready())) {
         LOGE(TAG, res);
         return ErrorUninitialized;        
     }
-    delay1ms(HARDWARE_PAUSE_MS);
-    if (Ok != (res = sx1278_write_reg_safe(REG_OP_MODE, OP_MODE_LOW_FREQ_ON | OP_MODE_STDBY))) {
-        LOGE(TAG, res);
+
+    //убедимся, что чип в режиме сна
+    val = sx1278_read_reg(REG_OP_MODE);
+    if ((val & OP_MODE_MASK) != OP_MODE_SLEEP) {
+        LOGE(TAG, val);
         return ErrorUninitialized; 
+    }
+    //This bit can be modified only in Sleep mode. A write operation on other device modes is ignored.
+    val  &= ~OP_MODE_LONG_RANGE_MODE; //сбрасываем 7ой бит, переводим в режим FSK (GMSK)
+    sx1278_write_reg(REG_OP_MODE, val);
+
+    LOGI(TAG, 11);
+
+    val |= OP_MODE_LOW_FREQ_ON; //включаем режим прием нижнего ВЧ диапазона (band 3)
+    val &= ~OP_MODE_SLEEP; //для очевидности сбрасываем биты режима сна
+    val |= OP_MODE_STDBY; //включаем режим стендбай
+    sx1278_write_reg(REG_OP_MODE, val);
+    if (Ok != (res = sx1278_wait_mode_ready())) {
+        LOGE(TAG, res);
+        return ErrorUninitialized;        
     }
     LOGI(TAG, 2);
 
@@ -530,17 +580,20 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
     LOGI(TAG, 6);
 
 
-
     /* 7. Перевод в режим приёма GMSK */
-    if(Ok != (res = sx1278_write_reg_safe(REG_OP_MODE, 
-            OP_MODE_LONGRANGE_MASK | OP_MODE_MODULATION_FSK_MASK | 
-            OP_MODE_LOW_FREQ_ON | OP_MODE_RX))) {
-        LOGE(TAG, res);
-        return ErrorUninitialized;
+    val = sx1278_read_reg(REG_OP_MODE); 
+    //контрольная проверка - конфигурация должна быть произведена
+    if (((val & OP_MODE_MASK) != OP_MODE_STDBY) || (val & OP_MODE_LONG_RANGE_MODE)) {
+        LOGE(TAG, val);
+        return ErrorUninitialized; 
     }
+
+    val &= ~OP_MODE_STDBY; //для очевидности сбрасываем биты режима стендбай
+    val |= OP_MODE_RX; //включаем режим Tx (прием)
+    sx1278_write_reg(REG_OP_MODE, val);
     LOGI(TAG, 7);
 
-    return Ok;
+    return sx1278_wait_mode_ready();
 }
 
 
@@ -574,7 +627,7 @@ en_result_t sx1278_read_packet(uint8_t* buf, uint16_t const len, uint16_t* actua
     while (TRUE) {
         irq_flags2 = sx1278_read_reg(REG_IRQ_FLAGS2);
         
-        if (((irq_flags2 & IRQ2_PAYLOAD_READY) != 0U) || ((irq_flags2 & IRQ2_FIFO_FULL) != 0U)) {
+        if ((irq_flags2 & IRQ2_PAYLOAD_READY) != 0U) { //|| ((irq_flags2 & IRQ2_FIFO_FULL) != 0U)) {
             break;  /* PayloadReady установлен */
         }
         
@@ -601,24 +654,24 @@ en_result_t sx1278_read_packet(uint8_t* buf, uint16_t const len, uint16_t* actua
      * Это означает BURST чтение с одним адресным байтом в начале
      */
     SPI_SetCsLow();
-    __NOP();__NOP();
+    __NOP();__NOP(); __NOP(); __NOP();
     
     /* Адресный байт: MSB=0 (чтение), адрес 0x00 (FIFO) */
     Spi_TxRx(REG_FIFO & SPI_READ_MASK);
     
     /* Чтение данных байт за байтом без повторной отправки адреса */
-    uint16_t i = 0U;
-    for (; i < read_len; i++) {
+    
+    for (uint16_t i = 0U; i < read_len; i++) {
         buf[i] = Spi_TxRx(0x00U);
         
     }
-    __NOP();__NOP();
+    __NOP();__NOP(); __NOP(); __NOP();
     SPI_SetCsHigh();
 
     //После чтения сбросить флаг IRQ2_PAYLOAD_READY
     sx1278_write_reg(REG_IRQ_FLAGS2, IRQ2_PAYLOAD_READY);
 
-    *actual = i + 1;
+    *actual = read_len;
     // Всё хорошо
     return Ok;
 }
