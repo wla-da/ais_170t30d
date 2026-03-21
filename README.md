@@ -174,7 +174,7 @@ Info : Target voltage: 3.286400
 Error: init mode failed (unable to connect to the target)
 ```
 
-## Подключение платы E32 170T30D к ST-link v2 
+## Подключаем плату E32 170T30D к ST-link v2 
 1. Готовим самодельный шлейф на основе разъема PLL-1x5 1.27 мм + Dupont-провода с разъемом "мама" на одном конце
 2. Припаиваем разъем (гнездо) PBL-1x5 1.27 мм к плате E32 170T30D
 3. Подключаем шлейф к плате E32 170T30D и ST-link v2 в соответствии с SWD (Serial Wire Debug):
@@ -193,9 +193,12 @@ Error: init mode failed (unable to connect to the target)
 
 Многочисленные попытки произвести чтение памяти HC32L110C4UA через связку OpenOCD+ST Link v2 не дали результатов - MCU упорно не хотел общаться по SWD.
 
-Пришлось сделать вольный автоматический [перевод](isp_hdsc/README.md) с китайского гайда по работе c ISP тулом (hdsc.exe) и убедиться, что память зашифрована. А, значит, не получится сделать бэкап фирменной прошивки вендора.
 
-Схема подключения платы E32 170T30D к USB-UART конвертору на базе [FT232](https://www.chipdip.ru/product/ft232-usb-uart-board-mini-preobrazovatel-usb-uart-waveshare-9000322637). Важно не забыть поставить перемычку на плате FT232 для работы с напряжением 3,3 вольта:
+## Подключаем плату E32 170T30D к USB-UART конвертору для прошивки через ISP 
+
+Пришлось сделать вольный автоматический [перевод](isp_hdsc/README.md) с китайского гайда по работе c ISP прошивальщиком (hdsc.exe) и убедиться, что память зашифрована. А, значит, не получится сделать бэкап фирменной прошивки вендора.
+
+Схема подключения платы E32 170T30D к USB-UART конвертору. В моем случае конвертер на базе [FT232](https://www.chipdip.ru/product/ft232-usb-uart-board-mini-preobrazovatel-usb-uart-waveshare-9000322637). Думаю, подойдет и аналогичный USB-UART(TTL) конвертер на CH340 и подобных. Важно не забыть поставить перемычку на плате FT232 для работы с напряжением 3,3 вольта, чтобы не сжечь плату MCU:
 
 | E32 170T30D | HC32L110C4UA | FT232  | Комментарий               |
 | ----------- | ------------ | ----------  | -----------               |
@@ -330,6 +333,119 @@ pyocd list
 
 
 ```
+
+Далее, если MCU уже разблокирован и работает SWD, для прошивки можно использовать PyOCD. Настроил в VS Code удобные кнопки с отображением на статус-баре для сборки, прошивки, прошиви с автоматическим монитором UART и очистки проекта с помощью расширения (плагина) VSCode Action Buttons. Установка через маркетплейс или командой:
+`code --install-extension seunlanlege.action-buttons`
+
+Далее, в файле .vscode/tasks.json добавить блок задач:
+``` json
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "make",
+            "group": "build",
+            "problemMatcher": ["$gcc"],
+            "detail": "Собрать проект"
+        },
+        {
+            "label": "clean",
+            "type": "shell",
+            "command": "make clean",
+            "group": "build",
+            "detail": "Очистить результаты сборки"
+        },
+        {
+            "label": "flash",
+            "type": "shell",
+            "command": "make flash",
+            "group": "build",
+            "detail": "Прошить прошивку через PyOCD"
+        },
+        {
+            "label": "build and flash",
+            "type": "shell",
+            "command": "make && make flash",
+            "group": "build",
+            "detail": "Собрать и сразу прошить"
+        }
+    ]
+}
+```
+Добавить кнопки в файл настроек workspace, обычно в корне вида [название воркспейса].code-workspace:
+``` json
+    "settings": {
+        "actionButtons": {
+            "reloadButton": "♻️",
+            "loadNpmCommands": false,
+            "commands": [
+                {
+                    "name": "🔨 Build",
+                    "command": "make",
+                    "singleInstance": true,
+                    "color": "#00ff00"
+                },
+                {
+                    "name": "📀 Flash",
+                    "command": "make flash",
+                    "singleInstance": true,
+                    "color": "#88aaff"
+                },
+                {
+                    "name": "🧹 Clean",
+                    "command": "make clean",
+                    "singleInstance": true,
+                    "color": "#ff5555"
+                },
+                {
+                    "name": "📡 Flash+Monitor",
+                    "command": "./flash_monitor.sh",
+                    "singleInstance": true,
+                    "color": "#ffaa00"
+                }
+            ]
+        }
+    }
+```
+Так кнопки на статус-баре выглядят у меня:
+
+![Buttons](img/action_btns.png)
+
+Рис 11. Настроенный статус-бар с кнопками для сборки, прошивки и тп
+
+Содержимое файла .vscode/c_cpp_properies.json с настройками для компилятора:
+``` json
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/Libraries/CMSIS",
+                "${workspaceFolder}/Libraries/HC32L110_Driver/inc",
+                "${workspaceFolder}/Libraries/Debug",
+                "${workspaceFolder}/User"
+            ],
+            "defines": [
+                "HC32L110X4",      // или HC32L110X6 для 32K версии
+                "USE_STDPERIPH_DRIVER"
+            ],
+            "compilerPath": "/usr/bin/arm-none-eabi-gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-arm"
+        }
+    ],
+    "version": 4
+}
+```
+Получилось весьма удобно: MCU подключен одновременно и к ST-link v2 для прошивки и конвертору USB-UART (FT232). Питание поступает только от ST-link v2. Сразу после прошивки по кнопке Flash+Monitor видим в консоли VS Code, что нам шлёт MCU через UART.
+
+![MCU-ST-link-UART](img/mcu_stlink_uart.png)
+
+Рис 12. Подключение MCU к ST-link v2 и USB-UART (FT232)
+
 
 ## TODO Идеи улучшения
 1. Использовать TXCO кварц, отклонение частоты (дрейф и тп) должно быть меньше 1/3 частоты девиации, т.е. не больше 500-700 Гц (!)

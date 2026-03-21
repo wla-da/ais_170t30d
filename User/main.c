@@ -97,7 +97,7 @@ en_result_t init() {
     power_ctrl_init();
     power_tx_rx_off();
 
-    return sx1278_init_rx_ais(rx_mode_packet, AIS_FREQ_LOWER_HZ);
+    return sx1278_init_rx_ais(rx_mode_packet, 162090000);//AIS_FREQ_LOWER_HZ);
 }
 
 
@@ -121,18 +121,23 @@ int main(void) {
 
     //включаем питание LNA и переключаем ВЧ-ключ на прием
     res = power_rx_on();
-    log_write_str("Rx on");
     LOGI(TAG, res);
-
+    log_write_str("Rx on\r\n");
     
     uint8_t buff[FIXED_PACKET_LEN] = {0};
     uint16_t const buff_len = sizeof(buff);
 
     while(TRUE) {
+        //читаем уровень сигнала
+        uint8_t rssi = sx1278_get_rssi();
+        LOGI(TAG, rssi);
+
         uint16_t read_bytes = 0;
         res = sx1278_read_packet(buff, buff_len, &read_bytes);
+        LOGI(TAG, res);
 
         while (Ok != res) {
+            LOGE(TAG, res);
             //обнуляем кол-во прочитанных байт
             read_bytes = 0;
             //явно сбрасываем радиочип
@@ -157,7 +162,6 @@ int main(void) {
         }
         log_write_char('\r');
         log_write_char('\n');
-        //delay1ms(1000);
     }
     
     power_tx_rx_off(); 

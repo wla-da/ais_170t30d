@@ -37,6 +37,7 @@
 #define REG_FRF_MSB              0x06
 #define REG_FRF_MID              0x07
 #define REG_FRF_LSB              0x08
+#define REG_RSSI_VALUE           0x11
 #define REG_RX_BW                0x12
 #define REG_RX_CONFIG            0x0D
 #define REG_OOK_PEAK             0x14
@@ -89,6 +90,7 @@ other device modes is ignored.
 #define AGC_AUTO_ON_BIT          (1 << 3) //0 LNA gain forced by the LnaGain Setting/1 LNA gain is controlled by the AGC
 #define RX_TRIGGER_NONE          0 //AFC_AUTO_ON_BIT и AGC_AUTO_ON_BIT должны быть 0, см таблицу 24 Receiver Startup Options
 #define RX_TRIGGER_RSSI          0x01 //AGC или AGC & AFC, отдельно AFC нельзя
+#define RX_RESTART_RX_WITHOUT_PLL_LOCK (1 << 6)
 
 #define PREAMBLE_DETECT_OFF      0x00
 #define SYNC_CONFIG_OFF          0x00
@@ -224,7 +226,8 @@ static en_result_t sx1278_write_reg_safe(uint8_t addr, uint8_t val) {
     sx1278_write_reg(addr, val);
     //TODO нужно ли делать задержку перед чтением регистра?
     __NOP(); __NOP(); __NOP(); __NOP();
-    return (sx1278_read_reg(addr) & val) ? Ok : ErrorUninitialized;
+    //TODO не совсем строгая проверка - проверяем только те биты, что взводили
+    return ((sx1278_read_reg(addr) & val) == val) ? Ok : ErrorUninitialized;
 }
 
 
@@ -239,14 +242,19 @@ static en_result_t sx1278_write_reg_safe(uint8_t addr, uint8_t val) {
  */
 static en_result_t sx1278_wait_mode_ready() {
     uint32_t wait_counter = 0;
-    while(!(IRQ1_MODE_READY & sx1278_read_reg(REG_IRQ_FLAGS1))) {
+    uint8_t irq_flags;
+    while(TRUE) {
+        irq_flags = sx1278_read_reg(REG_IRQ_FLAGS1);
+        if (IRQ1_MODE_READY & irq_flags) {
+            return Ok;
+        }
         //__NOP(); __NOP(); __NOP(); __NOP();
         delay1ms(1); //TODO возможно многовато времени, можно перевести на цикл из __NOP()
         if (++wait_counter > MAX_MODE_READY_COUNTER) {
+            LOGI(TAG, irq_flags); 
             return ErrorNotReady;
         }
     }
-    return Ok;
 }
 
 static en_result_t sx1278_set_frequency(uint32_t frequency_hz)
@@ -277,13 +285,11 @@ static en_result_t sx1278_set_bitrate(uint32_t bitrate)
 static en_result_t sx1278_set_deviation(uint16_t fdev_hz)
 {
     uint16_t reg_val = (uint16_t)(((uint64_t)fdev_hz << 19) / SX1278_CRYSTAL_HZ);
-    if ((sx1278_write_reg_safe(REG_FDEV_MSB, (reg_val >> 8) & 0xFF) != Ok)  ||
-        (sx1278_write_reg_safe(REG_FDEV_LSB, reg_val & 0xFF) != Ok)) {
-             return ErrorUninitialized;             
-    }
-    return Ok;
-}
+    sx1278_write_reg(REG_FDEV_MSB, (reg_val >> 8) & 0xFF);
+    //TODO проверка записи RegFdevMsb
 
+    return sx1278_write_reg_safe(REG_FDEV_LSB, reg_val & 0xFF);
+}
 
 
 /* Пакетный режим (Packet)
@@ -294,14 +300,13 @@ static en_result_t sx1278_set_deviation(uint16_t fdev_hz)
 static en_result_t sx1278_init_packet_mode(void)
 {
     //включаем пакетный режим
-    en_result_t res = sx1278_write_reg_safe(REG_PACKET_CONFIG2, PACKET_MODE_BIT);
-    if (res != Ok) {
-        return res;
-    }
+    sx1278_write_reg(REG_PACKET_CONFIG2, PACKET_MODE_BIT);
+    //TODO проверить корректность записи путем чтения регистра по маске
+
     //включаем фиксированную длину пакета
     //TODO провести эксперимент с безлимитной длиной пакета
     //Unlimited Length Packet Format: bit PacketFormat is set to 0 and PayloadLength is set to 0
-    res = sx1278_write_reg_safe(REG_PACKET_CONFIG1, PACKET_FORMAT_FIXED);
+    en_result_t res = sx1278_write_reg_safe(REG_PACKET_CONFIG1, PACKET_FORMAT_FIXED);
     if (res != Ok) {
         return res;
     }
@@ -317,10 +322,9 @@ static en_result_t sx1278_init_packet_mode(void)
     */
     uint8_t sync_word_len = sizeof(SYNC_WORD);
     uint8_t sync_size = sync_word_len - 1; //на один байт меньше размера синхрослова для ioHomeOn=0
-    sx1278_write_reg_safe(REG_SYNC_CONFIG, SYNC_WORD_ON_BIT | sync_size);
-    if (res != Ok) {
-        return res;
-    }
+    sx1278_write_reg(REG_SYNC_CONFIG, SYNC_WORD_ON_BIT | sync_size);
+    //TODO для перестраховки перечитать содержимое регистра
+
     //устанавливаем синхрослово
     for (uint8_t i = 0; i < sync_word_len; i++) {
         res = sx1278_write_reg_safe(REG_SYNC_VALUE1 + i, SYNC_WORD[i]);
@@ -339,21 +343,19 @@ static en_result_t sx1278_set_continuous_mode(void)
 {
     uint8_t v = sx1278_read_reg(REG_PACKET_CONFIG2);
     v  &= ~PACKET_MODE_BIT;           // bit6 = 0 для непрерывного режима
-    en_result_t res = sx1278_write_reg_safe(REG_PACKET_CONFIG2, v);
-    if (res != Ok) {
-        return res;
-    }
+    sx1278_write_reg(REG_PACKET_CONFIG2, v);
+    //TODO для перестраховки перечитать содержимое регистра
 
     v = sx1278_read_reg(REG_OOK_PEAK);
     v  &= ~BIT_SYNC_ON;           // bit5 = 0 для выключения бит синхронизатора
-    res = sx1278_write_reg_safe(REG_OOK_PEAK, v);
-    if (res != Ok) {
-        return res;
-    }
+    sx1278_write_reg(REG_OOK_PEAK, v);
+    //TODO для перестраховки перечитать содержимое регистра
 
     v = sx1278_read_reg(REG_SYNC_CONFIG);
     v  &= ~SYNC_WORD_ON_BIT;           // bit4 = 0 для выключения поиска синхрослова
-    return sx1278_write_reg_safe(REG_SYNC_CONFIG, v);
+    sx1278_write_reg(REG_SYNC_CONFIG, v);
+    //TODO проверить корректность записи в регистр чтением через маску
+    return Ok;
 }
 
 
@@ -412,8 +414,8 @@ en_result_t sx1278_configure_lf_registers(pll_bandwidth_t pll_bw) {
     }
 
     // --- Шаг 2: Настройка AGC ---
-    res = sx1278_write_reg_safe(REG_AGC_REF_LF, AGC_REF_LF_DEFAULT);
-    if (res != Ok) return res;
+    sx1278_write_reg(REG_AGC_REF_LF, AGC_REF_LF_DEFAULT);
+    //TODO проверить записанные значения в регистр
 
     res = sx1278_write_reg_safe(REG_AGC_THRESH1_LF, AGC_THRESH1_LF_DEFAULT);
     if (res != Ok) return res;
@@ -429,21 +431,21 @@ en_result_t sx1278_configure_lf_registers(pll_bandwidth_t pll_bw) {
     // --- Шаг 3: Настройка PLL ---
     // Формируем байт: старшие 2 бита = pll_bw, младшие 6 бит = зарезервированные 0x10
     reg_val = pll_bw | PLL_LF_RESERVED_BITS;
-    res = sx1278_write_reg_safe(REG_PLL_LF, reg_val);
-    if (res != Ok) return res;
+    sx1278_write_reg(REG_PLL_LF, reg_val);
+    //TODO проверить записанные значения в регистр
 
     return Ok;
 }
 
 
-/* ---------------- Основная функция ---------------- */
+/* ---------------- функция инициализации приема AIS сигнала ---------------- */
 en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
 {
     if ((mode != rx_mode_packet) && (mode != rx_mode_continuous)) {
         return ErrorInvalidParameter;
     }
     if ((frequency_hz < AIS_FREQ_LOWER_HZ) || (frequency_hz > AIS_FREQ_UPPER_HZ)) {
-        return ErrorInvalidParameter;
+        //return ErrorInvalidParameter;
     }
         
     en_result_t res;
@@ -473,10 +475,9 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
 
     /* 2. софт ресет радиочипа через погружение в сон */
     sx1278_write_reg(REG_OP_MODE, OP_MODE_SLEEP);
-    if (Ok != (res = sx1278_wait_mode_ready())) {
-        LOGE(TAG, res);
-        return ErrorUninitialized;        
-    }
+    delay1ms(HARDWARE_PAUSE_MS);
+
+    LOGI(TAG, 11);
 
     //убедимся, что чип в режиме сна
     val = sx1278_read_reg(REG_OP_MODE);
@@ -484,11 +485,12 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
         LOGE(TAG, val);
         return ErrorUninitialized; 
     }
-    //This bit can be modified only in Sleep mode. A write operation on other device modes is ignored.
-    val  &= ~OP_MODE_LONG_RANGE_MODE; //сбрасываем 7ой бит, переводим в режим FSK (GMSK)
-    sx1278_write_reg(REG_OP_MODE, val);
+    LOGI(TAG, 12);
 
-    LOGI(TAG, 11);
+    //This bit can be modified only in Sleep mode. A write operation on other device modes is ignored.
+    val  &= ~OP_MODE_LONG_RANGE_MODE; //явно сбрасываем 7ой бит, переводим в режим FSK (GMSK)
+    sx1278_write_reg(REG_OP_MODE, val);
+    LOGI(TAG, 13);
 
     val |= OP_MODE_LOW_FREQ_ON; //включаем режим прием нижнего ВЧ диапазона (band 3)
     val &= ~OP_MODE_SLEEP; //для очевидности сбрасываем биты режима сна
@@ -533,14 +535,13 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
     LOGI(TAG, 61);
 
     //TODO пока выключаем AFC и AGC по RSSI
-    if(Ok != (res = sx1278_write_reg_safe(REG_RX_CONFIG, RX_TRIGGER_NONE))) {
-        LOGE(TAG, res);
-        return ErrorUninitialized;      
-    }
+    sx1278_write_reg(REG_RX_CONFIG, RX_TRIGGER_NONE);
+    //TODO проверка успешности записи в регистр
+
     LOGI(TAG, 62);
 
     //настраиваем полосу пропускания FIR фильтра
-    if(Ok != (sx1278_set_rx_bandwidth(FIR_BANDWIDTH))) {
+    if(Ok != (res = sx1278_set_rx_bandwidth(FIR_BANDWIDTH))) {
         LOGE(TAG, res);
         return ErrorUninitialized;         
     }
@@ -623,6 +624,7 @@ en_result_t sx1278_read_packet(uint8_t* buf, uint16_t const len, uint16_t* actua
     /* 1. Ожидание флага PayloadReady (RegIrqFlags2, бит 2) */
     uint32_t timeout_ms = PAYLOAD_READY_TIMEOUT_MS;
     uint8_t irq_flags2 = 0U;
+    LOGI(TAG, 1);
     
     while (TRUE) {
         irq_flags2 = sx1278_read_reg(REG_IRQ_FLAGS2);
@@ -643,6 +645,8 @@ en_result_t sx1278_read_packet(uint8_t* buf, uint16_t const len, uint16_t* actua
         }
         delay1ms(1U);
     }
+
+    LOGI(TAG, 2);
 
     /* 2. Чтение FIXED_PACKET_LEN байт из FIFO (адрес 0x00) */
     /* По даташиту Section 2.2 (SPI Interface):
@@ -668,10 +672,56 @@ en_result_t sx1278_read_packet(uint8_t* buf, uint16_t const len, uint16_t* actua
     __NOP();__NOP(); __NOP(); __NOP();
     SPI_SetCsHigh();
 
+    LOGI(TAG, 3);
+
     //После чтения сбросить флаг IRQ2_PAYLOAD_READY
     sx1278_write_reg(REG_IRQ_FLAGS2, IRQ2_PAYLOAD_READY);
+    //TODO проверка успешности записи в регистр
+
+    uint8_t val = sx1278_read_reg(REG_OP_MODE); 
+    //контрольная проверка - конфигурация должна быть произведена
+    if (((val & OP_MODE_MASK) != OP_MODE_RX) || (val & OP_MODE_LONG_RANGE_MODE)) {
+        LOGE(TAG, val);
+        return ErrorUninitialized; 
+    }
+
+    /*
+    val &= ~OP_MODE_STDBY; //для очевидности сбрасываем биты режима стендбай
+    val |= OP_MODE_RX; //включаем режим Tx (прием)
+    sx1278_write_reg(REG_OP_MODE, val);
+    LOGI(TAG, 7);
+
+    return sx1278_wait_mode_ready();
+    */
+
+    //TODO возможно более корректно переводить в режим стендбай, а потом возвращать в Rx
+
+    //готовы принимать новый пакет
+    sx1278_write_reg(REG_RX_CONFIG, RX_TRIGGER_NONE | RX_RESTART_RX_WITHOUT_PLL_LOCK);
+    //TODO проверка успешности записи в регистр
 
     *actual = read_len;
     // Всё хорошо
-    return Ok;
+    return sx1278_wait_mode_ready();
+}
+
+
+/**
+ * @brief Чтение текущего RSSI
+ */
+int8_t sx1278_get_rssi(void)
+{
+    uint8_t rssi_raw;
+    
+    // Читаем регистр RegRssiValue (0x11)
+    // Примечание: Чтение возможно в любом режиме, но актуальные данные только в Rx
+    rssi_raw = sx1278_read_reg(REG_RSSI_VALUE);
+    
+    // Если значение 0, возможно приемник не активен или нет сигнала (шумовой порог)
+    // Но технически 0 тоже валидное чтение, просто очень слабый сигнал.
+    
+    // Конвертация по формуле даташита: RSSI = -rssi_raw / 2
+    // Возвращаем знаковое целое число (dBm). 
+    // Пример: если raw = 60, то RSSI = -30 dBm.
+    return rssi_raw >> 1;
 }

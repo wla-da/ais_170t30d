@@ -20,7 +20,7 @@
 #define FIXED_PACKET_LEN         40 
 
 //время ожидания заполнения FIFO в мс (по факту с погрешностью)
-#define PAYLOAD_READY_TIMEOUT_MS 100
+#define PAYLOAD_READY_TIMEOUT_MS 10*1000
 
 //версия прошивки sx1278
 #define SX1278_VERSION 0x12
@@ -98,5 +98,12 @@ en_result_t sx1278_read_packet(uint8_t* buf, uint16_t const len, uint16_t* actua
  *   ErrorNotReady - данных пока нет
  */
 en_result_t sx1278_read_continuous(uint8_t* buf, uint16_t const len, uint16_t* actual);
+
+
+/**
+ * @brief Чтение текущего RSSI
+ * TODO можно сделать возврат статуса ошибки и само значение RSSI через буфер
+ */
+int8_t sx1278_get_rssi(void);
 
 #endif /* SX1278_H */
