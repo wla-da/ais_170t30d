@@ -655,7 +655,7 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
     LOGI(TAG, 61);
 
     //AFC и AGC по RSSI
-    uint8_t v = RX_TRIGGER_PREAMBLE_DETECT | RX_AGC_AUTO_ON | RX_AFC_AUTO_ON;
+    uint8_t v = RX_TRIGGER_PREAMBLE_DETECT | RX_AGC_AUTO_ON;
     //RX_TRIGGER_PREAMBLE_DETECT | RX_AGC_AUTO_ON | RX_AFC_AUTO_ON;// RX_TRIGGER_PREAMBLE_DETECT | RX_AGC_AUTO_ON | RX_AFC_AUTO_ON;
     sx1278_write_reg(REG_RX_CONFIG, v); 
     LOGI(TAG, v);
@@ -919,7 +919,7 @@ en_result_t sx1278_read_packet(uint8_t* buf, uint16_t const len, uint16_t* actua
     //TODO возможно более корректно переводить в режим стендбай, а потом возвращать в Rx
 
     //готовы принимать новый пакет
-    sx1278_write_reg(REG_RX_CONFIG, RX_TRIGGER_PREAMBLE_DETECT | RX_AGC_AUTO_ON | RX_AFC_AUTO_ON | RX_RESTART_RX_WITHOUT_PLL_LOCK);
+    sx1278_write_reg(REG_RX_CONFIG, RX_TRIGGER_PREAMBLE_DETECT | RX_AGC_AUTO_ON |  RX_RESTART_RX_WITHOUT_PLL_LOCK);
         //RX_TRIGGER_PREAMBLE_DETECT | RX_RESTART_RX_WITHOUT_PLL_LOCK | RX_AGC_AUTO_ON | RX_AFC_AUTO_ON);
         // RX_TRIGGER_NONE | RX_RESTART_RX_WITHOUT_PLL_LOCK);
     //TODO проверка успешности записи в регистр
