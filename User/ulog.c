@@ -85,7 +85,7 @@ void log_write_hex(uint8_t h)
 */
 void log_write_u32(uint32_t value)
 {
-    char buffer[10];
+    char buffer[11];
     uint8_t index = 0;
 
     if (value == 0)
@@ -108,6 +108,22 @@ void log_write_u32(uint32_t value)
         index--;
         Uart1_TxChar(buffer[index]);
     }
+}
+
+void log_write_i32(int32_t value) {
+    uint32_t u_value;
+    if (value < 0) {
+        Uart1_TxChar('-');
+        // 1. Приводим к 64 битам, чтобы +2147483648 влезло
+        // 2. Инвертируем знак
+        // 3. Сохраняем в uint32_t
+        u_value = (uint32_t)(-(int64_t)value);
+    } 
+    else {
+        u_value = (uint32_t)value;
+    }
+    
+    log_write_u32(u_value);
 }
 
 /*

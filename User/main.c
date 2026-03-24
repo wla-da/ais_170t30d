@@ -97,7 +97,7 @@ en_result_t init() {
     power_ctrl_init();
     power_tx_rx_off();
 
-    return sx1278_init_rx_ais(rx_mode_packet, 162090000);//AIS_FREQ_LOWER_HZ);
+    return sx1278_init_rx_ais(rx_mode_packet, AIS_FREQ_LOWER_HZ);
 }
 
 
@@ -157,6 +157,7 @@ int main(void) {
         //TODO сколько времени это занимает, не успеет ли переполниться FIFO?
         log_write_char('\r');
         log_write_char('\n');
+        //TODO для отладки сигнал: FE 55 F8 1F 55 40 в NRZI, первый байт - флаг 0х7E
         for (uint16_t i = 0; i < read_bytes; i++) {
             log_write_hex(buff[i]);
         }

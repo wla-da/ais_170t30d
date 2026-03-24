@@ -37,10 +37,18 @@
 #define REG_FRF_MSB              0x06
 #define REG_FRF_MID              0x07
 #define REG_FRF_LSB              0x08
+#define REG_LNA                  0x0C
+#define REG_RX_CONFIG            0x0D
+#define REG_RSSI_THRESH          0x10
 #define REG_RSSI_VALUE           0x11
 #define REG_RX_BW                0x12
-#define REG_RX_CONFIG            0x0D
+#define REG_AFC_BW               0x13
 #define REG_OOK_PEAK             0x14
+#define REG_REG_AFC_FEI          0x1A
+#define REG_AFC_MSB              0x1B
+#define REG_AFC_LSB              0x1C
+#define REG_FEI_MSB              0x1D
+#define REG_FEI_LSB              0x1E
 #define REG_PREAMBLE_DETECT      0x1F
 #define REG_SYNC_CONFIG          0x27
 #define REG_SYNC_VALUE1          0x28
@@ -58,7 +66,16 @@
 #define SPI_WRITE_BIT          (1U << 7U)  /* MSB=1 для записи */
 #define SPI_READ_MASK          0x7FU       /* MSB=0 для чтения */
 
-#define IRQ1_MODE_READY         (1 << 7) //Set when the operation mode requested in Mode, is ready
+#define RSSI_THRESH_DBM          60 //уровень срабатывания RSSI в -дБм, т.е. значение 60 означает превышение порога срабатывания -60 дБм 
+/*
+Set when Sync and Address (if enabled) are detected.
+Cleared when leaving Rx or FIFO is emptied.
+This bit is read only in Packet mode, rwc in Continuous mode
+*/
+#define IRQ1_SYNC_ADDRESS_MATCH  1
+#define IRQ1_PREAMBLE_DETECT     (1 << 1) //Set when the Preamble Detector has found valid Preamble.
+#define IRQ1_RSSI                (1 << 3)
+#define IRQ1_MODE_READY          (1 << 7) //Set when the operation mode requested in Mode, is ready
 // Биты флагов в REG_IRQ_FLAGS2
 #define IRQ2_PAYLOAD_READY       (1 << 2)   // Пакет принят
 #define IRQ2_FIFO_OVERRUN        (1 << 4)   // Переполнение FIFO
@@ -86,13 +103,36 @@ other device modes is ignored.
 #define OP_MODE_RX               0x05
 #define OP_MODE_MASK             ((1 << 2) | (1 << 1) | 1) //маска b111 для определения режима чипа
 
-#define AFC_AUTO_ON_BIT          (1 << 4) //0 No AFC performed at receiver startup/1 AFC is performed at each receiver startup
-#define AGC_AUTO_ON_BIT          (1 << 3) //0 LNA gain forced by the LnaGain Setting/1 LNA gain is controlled by the AGC
-#define RX_TRIGGER_NONE          0 //AFC_AUTO_ON_BIT и AGC_AUTO_ON_BIT должны быть 0, см таблицу 24 Receiver Startup Options
+#define RX_TRIGGER_NONE          0 //RX_AGC_AUTO_ON и RX_AFC_AUTO_ON должны быть 0, см таблицу 24 Receiver Startup Options
 #define RX_TRIGGER_RSSI          0x01 //AGC или AGC & AFC, отдельно AFC нельзя
+#define RX_TRIGGER_PREAMBLE_DETECT 0x6
+#define RX_TRIGGER_PREAMBLE_AND_RSSI 0x7
+#define RX_AGC_AUTO_ON           (1 << 3) //0 LNA gain forced by the LnaGain Setting/1 LNA gain is controlled by the AGC
+#define RX_AFC_AUTO_ON           (1 << 4) //0 No AFC performed at receiver startup/1 AFC is performed at each receiver startup
+#define RX_RESTART_RX_WITH_PLL_LOCK (1 << 5)
 #define RX_RESTART_RX_WITHOUT_PLL_LOCK (1 << 6)
 
 #define PREAMBLE_DETECT_OFF      0x00
+/*
+Enables Preamble detector when set to 1. The AGC settings
+supersede this bit during the startup / AGC phase.
+*/
+#define PREAMBLE_DETECTOR_ON    (1 << 7) //бит включения детектора преамбулы: 0 Turned off/1 Turned on
+/*
+Number of Preamble bytes to detect to trigger an interrupt
+00 1 byte
+01 2 bytes
+10 3 bytes
+11 Reserved
+*/
+#define PREAMBLE_DETECTOR_SIZE  (0b01 << 5)//Число байт в преамбуле для срабатывания детектора
+/*
+максимальное количество ошибочных бит в преамбуле, при котором детектор 
+всё ещё считает преамбулу валидной. 
+Диапазон: 0–15 
+*/
+#define PREAMBLE_DETECTOR_TOL    10
+
 #define SYNC_CONFIG_OFF          0x00
 #define BITRATE_9600             9600 
 #define FDEV_AIS                 2400UL /* Девиация для AIS (±2,4 кГц) */
@@ -116,6 +156,7 @@ other device modes is ignored.
 #define PACKET_FORMAT_FIXED      0 //(1 << 7) 0 Fixed length/1 Variable length
 #define PACKET_MODE_BIT          (1 << 6) //0 Continuous mode/1 Packet mode
 #define SYNC_WORD_ON_BIT         (1 << 4) //Enables the Sync word generation and detection: 0 Off/1 On
+#define SYNC_PREAMBLE_POLARITY   (1 << 5) //Sets the polarity of the Preamble: 0 0xAA (default)/1 0x55
 
 #define MAX_MODE_READY_COUNTER 1000 //максимальное значения счетчика ожидания флага готовности состояния в REG_IRQ_FLAGS1
 
@@ -123,6 +164,39 @@ other device modes is ignored.
 //значения мантиссы и экспоненты для регистра RegRxBw для настройки FIR, см детали 3.5.6. Channel Filter
 static const uint16_t MANT_VALUES[] = {16, 20, 24};
 static const uint8_t  MANT_CODES[]   = {0, 1, 2};
+
+static const uint8_t  REGS[]  = {
+    REG_FIFO,
+    REG_OP_MODE,
+    REG_BITRATE_MSB,
+    REG_BITRATE_LSB,
+    REG_FDEV_MSB,
+    REG_FDEV_LSB,
+    REG_FRF_MSB,
+    REG_FRF_MID,
+    REG_FRF_LSB,
+    REG_LNA,
+    REG_RX_CONFIG,
+    REG_RSSI_THRESH,
+    REG_RSSI_VALUE,
+    REG_RX_BW,
+    REG_AFC_BW,
+    REG_OOK_PEAK,
+    REG_REG_AFC_FEI,
+    REG_AFC_MSB,
+    REG_AFC_LSB,
+    REG_FEI_MSB,
+    REG_FEI_LSB,
+    REG_PREAMBLE_DETECT,
+    REG_SYNC_CONFIG,
+    REG_SYNC_VALUE1,
+    REG_PACKET_CONFIG1,
+    REG_PACKET_CONFIG2,
+    REG_PAYLOAD_LENGTH,
+    REG_FIFO_THRESH,
+    REG_IRQ_FLAGS1,
+    REG_IRQ_FLAGS2,
+    REG_VERSION};
 
 // Возможные значения полосы ФАПЧ (биты 7-6) в регистре RegPllLf (0x70)
 typedef enum {
@@ -245,7 +319,7 @@ static en_result_t sx1278_wait_mode_ready() {
     uint8_t irq_flags;
     while(TRUE) {
         irq_flags = sx1278_read_reg(REG_IRQ_FLAGS1);
-        if (IRQ1_MODE_READY & irq_flags) {
+        if (IRQ1_MODE_READY == (IRQ1_MODE_READY & irq_flags)) {
             return Ok;
         }
         //__NOP(); __NOP(); __NOP(); __NOP();
@@ -259,7 +333,7 @@ static en_result_t sx1278_wait_mode_ready() {
 
 static en_result_t sx1278_set_frequency(uint32_t frequency_hz)
 {
-    uint32_t frf = ((uint64_t)frequency_hz << 19) / SX1278_CRYSTAL_HZ;
+    uint32_t frf = ((uint64_t)frequency_hz * SX1278_STEP_KOEFF) / SX1278_CRYSTAL_HZ;
     uint8_t msb = (frf >> 16) & 0xFF;
     uint8_t mid = (frf >> 8) & 0xFF;
     uint8_t lsb = frf & 0xFF;
@@ -284,7 +358,7 @@ static en_result_t sx1278_set_bitrate(uint32_t bitrate)
 
 static en_result_t sx1278_set_deviation(uint16_t fdev_hz)
 {
-    uint16_t reg_val = (uint16_t)(((uint64_t)fdev_hz << 19) / SX1278_CRYSTAL_HZ);
+    uint16_t reg_val = (uint16_t)(((uint64_t)fdev_hz * SX1278_STEP_KOEFF) / SX1278_CRYSTAL_HZ);
     sx1278_write_reg(REG_FDEV_MSB, (reg_val >> 8) & 0xFF);
     //TODO проверка записи RegFdevMsb
 
@@ -315,14 +389,28 @@ static en_result_t sx1278_init_packet_mode(void)
     if (res != Ok) {
         return res;
     }
+
+    //явно включаем бит-синк
+    uint8_t v = sx1278_read_reg(REG_OOK_PEAK);
+    v  |= BIT_SYNC_ON;           // bit5 = 1 для включения бит синхронизатора
+    sx1278_write_reg(REG_OOK_PEAK, v);
+
     /*
     рассчитываем длину синхрослова и значение 
     Size of the Sync word: (SyncSize + 1) bytes, (SyncSize) bytes if ioHomeOn=1
     для записи в регистр REG_SYNC_CONFIG
     */
     uint8_t sync_word_len = sizeof(SYNC_WORD);
+    if (0 == sync_word_len) {
+        //выключим поиск синхрослова
+        v = sx1278_read_reg(REG_SYNC_CONFIG);
+        v  &= ~SYNC_WORD_ON_BIT;           // bit4 = 0 для выключения поиска синхрослова
+        v |= SYNC_PREAMBLE_POLARITY;
+        sx1278_write_reg(REG_SYNC_CONFIG, v);
+        return Ok;
+    }
     uint8_t sync_size = sync_word_len - 1; //на один байт меньше размера синхрослова для ioHomeOn=0
-    sx1278_write_reg(REG_SYNC_CONFIG, SYNC_WORD_ON_BIT | sync_size);
+    sx1278_write_reg(REG_SYNC_CONFIG, SYNC_WORD_ON_BIT | SYNC_PREAMBLE_POLARITY | sync_size);
     //TODO для перестраховки перечитать содержимое регистра
 
     //устанавливаем синхрослово
@@ -358,11 +446,41 @@ static en_result_t sx1278_set_continuous_mode(void)
     return Ok;
 }
 
+/**
+ * читает флаг превышения RSSI порогового уровня
+ */
+uint8_t is_rssi_more_threshold() {
+    uint8_t irq_flags = sx1278_read_reg(REG_IRQ_FLAGS1);
+    return (IRQ1_RSSI & irq_flags) == IRQ1_RSSI;
+}
 
+/**
+ * Получить ошибку частоты FEI в Гц
+ * FEI = F STEP * FeiValue
+ */
+int32_t sx1278_get_fei_hz() {
+    uint8_t msb = sx1278_read_reg(REG_FEI_MSB);
+    uint8_t lsb = sx1278_read_reg(REG_FEI_LSB);
+    int16_t fei_value = (int16_t)((msb << 8) | lsb);
+    return (int32_t)(((int64_t)fei_value * (int64_t)SX1278_CRYSTAL_HZ) / SX1278_STEP_KOEFF); 
+}
+
+/**
+ * Получить значение AFC в Гц
+ * AFC = F STEP * AfcValue
+ */
+int32_t sx1278_get_afc_hz() {
+    uint8_t msb = sx1278_read_reg(REG_AFC_MSB);
+    uint8_t lsb = sx1278_read_reg(REG_AFC_LSB);
+    int16_t afc_value = (int16_t)((msb << 8) | lsb);
+    return (int32_t)(((int64_t)afc_value * (int64_t)SX1278_CRYSTAL_HZ) / SX1278_STEP_KOEFF);
+}
 
 /**
  * Установка полосы пропускания FIR фильтра, зависит от частоты кварца
  * см детали 3.5.6. Channel Filter и Table 40 Available RxBw Settings
+ * Двухсторонняя полоса пропускания по уровню 20 дб может быть оценена (см формулу Карсона):
+ * BW 20dB = BR + 2*F_DEV = 9600 + 2*2,4 = 14,4 кГц
  * @return ErrorInvalidMode если не получится подобрать необходимые значения, 
  * иначе - статус записи в регистр
  */
@@ -445,7 +563,7 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
         return ErrorInvalidParameter;
     }
     if ((frequency_hz < AIS_FREQ_LOWER_HZ) || (frequency_hz > AIS_FREQ_UPPER_HZ)) {
-        //return ErrorInvalidParameter;
+        return ErrorInvalidParameter;
     }
         
     en_result_t res;
@@ -528,15 +646,22 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
     /* 6. Настройка режимов приёма */
     //отключаем детектор преамбулы
     //The AGC settings supersede this bit during the startup / AGC phase.
-    if(Ok != (res = sx1278_write_reg_safe(REG_PREAMBLE_DETECT, PREAMBLE_DETECT_OFF))) {
+    if(Ok != (res = sx1278_write_reg_safe(REG_PREAMBLE_DETECT, 
+        PREAMBLE_DETECTOR_ON | PREAMBLE_DETECTOR_SIZE | PREAMBLE_DETECTOR_TOL))) {
+    //if(Ok != (res = sx1278_write_reg_safe(REG_PREAMBLE_DETECT, PREAMBLE_DETECT_OFF))) {
         LOGE(TAG, res);
         return ErrorUninitialized;      
     }
     LOGI(TAG, 61);
 
-    //TODO пока выключаем AFC и AGC по RSSI
-    sx1278_write_reg(REG_RX_CONFIG, RX_TRIGGER_NONE);
+    //AFC и AGC по RSSI
+    uint8_t v = RX_TRIGGER_PREAMBLE_DETECT | RX_AGC_AUTO_ON | RX_AFC_AUTO_ON;
+    //RX_TRIGGER_PREAMBLE_DETECT | RX_AGC_AUTO_ON | RX_AFC_AUTO_ON;// RX_TRIGGER_PREAMBLE_DETECT | RX_AGC_AUTO_ON | RX_AFC_AUTO_ON;
+    sx1278_write_reg(REG_RX_CONFIG, v); 
+    LOGI(TAG, v);
+        //RX_TRIGGER_NONE);
     //TODO проверка успешности записи в регистр
+    LOGI(TAG, sx1278_read_reg(REG_RX_CONFIG));
 
     LOGI(TAG, 62);
 
@@ -548,10 +673,15 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
     LOGI(TAG, 63);
 
     //настраиваем LF регистры согласно Table 43 Low Frequency Additional Registers
-    if(Ok != (res = sx1278_configure_lf_registers(PLL_BW_75_KHZ))) {
+    if(Ok != (res = sx1278_configure_lf_registers(PLL_BW_150_KHZ))) {
         return ErrorUninitialized;        
     }
     LOGI(TAG, 64);
+
+    if (Ok != (res = sx1278_write_reg_safe(REG_RSSI_THRESH, RSSI_THRESH_DBM << 1))) {
+        return ErrorUninitialized; 
+    }
+    LOGI(TAG, 65);
 
     if (mode == rx_mode_packet)
     {
@@ -594,7 +724,17 @@ en_result_t sx1278_init_rx_ais(sx_rx_mode_t mode, uint32_t frequency_hz)
     sx1278_write_reg(REG_OP_MODE, val);
     LOGI(TAG, 7);
 
-    return sx1278_wait_mode_ready();
+   
+    log_write_char('\r');
+    log_write_char('\n');
+    //для отладки
+    for (uint16_t i = 0; i < sizeof(REGS); i++) {
+        log_write_hex(sx1278_read_reg(REGS[i]));
+    }
+    log_write_char('\r');
+    log_write_char('\n');
+
+    return Ok;// //res = sx1278_wait_mode_ready();
 }
 
 
@@ -630,18 +770,95 @@ en_result_t sx1278_read_packet(uint8_t* buf, uint16_t const len, uint16_t* actua
         irq_flags2 = sx1278_read_reg(REG_IRQ_FLAGS2);
         
         if ((irq_flags2 & IRQ2_PAYLOAD_READY) != 0U) { //|| ((irq_flags2 & IRQ2_FIFO_FULL) != 0U)) {
-            break;  /* PayloadReady установлен */
+            //проверим, что установлен флаги детекта преамбулы и обнаружено синхрослово
+            uint8_t irq_flags1 = sx1278_read_reg(REG_IRQ_FLAGS1);
+            
+            LOGI(TAG, 21);
+            LOGI(TAG, sx1278_get_rssi());
+            LOGI(TAG, is_rssi_more_threshold());
+            LOGI(TAG, irq_flags1);
+            LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS2));
+
+            log_write_i32(sx1278_get_fei_hz());
+            log_write_str("<fei ");
+            log_write_i32(sx1278_get_afc_hz());
+            log_write_str("<afc\r\n");
+
+            if ((irq_flags1 & IRQ1_PREAMBLE_DETECT) && 
+                (irq_flags1 & IRQ1_SYNC_ADDRESS_MATCH)) {
+                //всё корректно, можем читать FIFO с данными
+                LOGI(TAG, 32);
+                break;
+            }
+            LOGI(TAG, 33);
+            //очистка всех флагов
+            sx1278_write_reg(REG_IRQ_FLAGS2, 0xFF);
+            return ErrorUninitialized;             
         }
-        
-        /* Проверка на FIFO Overrun (ошибка переполнения) */
-        if ((irq_flags2 & IRQ2_FIFO_OVERRUN) != 0U) {
-            /* Очистить флаг overrun записью 1 */
-            sx1278_write_reg(REG_IRQ_FLAGS2, IRQ2_FIFO_OVERRUN);
+        else if ((irq_flags2 & IRQ2_FIFO_FULL) != 0U) {
+            LOGI(TAG, 22);
+            LOGI(TAG, sx1278_get_rssi());
+            LOGI(TAG, is_rssi_more_threshold());
+            LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS1));
+            LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS2));
+
+            log_write_i32(sx1278_get_fei_hz());
+            log_write_str("<fei ");
+            log_write_i32(sx1278_get_afc_hz());
+            log_write_str("<afc\r\n");
+
+            //очистка всех флагов
+            sx1278_write_reg(REG_IRQ_FLAGS2, 0xFF);
             return ErrorUninitialized;
         }
+        /* Проверка на FIFO Overrun (ошибка переполнения) */
+        else if ((irq_flags2 & IRQ2_FIFO_OVERRUN) != 0U) {
+            LOGI(TAG, 23);
+            LOGI(TAG, sx1278_get_rssi());
+            LOGI(TAG, is_rssi_more_threshold());
+            LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS1));
+            LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS2));
+ 
+            log_write_i32(sx1278_get_fei_hz());
+            log_write_str("<fei ");
+            log_write_i32(sx1278_get_afc_hz());
+            log_write_str("<afc\r\n");
+
+            //очистка всех флагов
+            sx1278_write_reg(REG_IRQ_FLAGS2, 0xFF);
+            return ErrorUninitialized;
+        }
+
         timeout_ms--;
         if (0 >= timeout_ms) {
+            LOGI(TAG, 18);
+            LOGI(TAG, sx1278_get_rssi());
+            LOGI(TAG, is_rssi_more_threshold());
+            LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS1));
+            LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS2));
+
+            log_write_i32(sx1278_get_fei_hz());
+            log_write_str("<fei ");
+            log_write_i32(sx1278_get_afc_hz());
+            log_write_str("<afc\r\n");
+
+            //очистка всех флагов
+            sx1278_write_reg(REG_IRQ_FLAGS2, 0xFF);
             return ErrorTimeout;
+        }
+        if (0 == timeout_ms % 2000) {
+            LOGI(TAG, 19);
+            LOGI(TAG, sx1278_get_rssi());
+            LOGI(TAG, is_rssi_more_threshold());
+            LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS1));
+            LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS2));
+
+            log_write_i32(sx1278_get_fei_hz());
+            log_write_str("<fei ");
+            log_write_i32(sx1278_get_afc_hz());
+            log_write_str("<afc\r\n");
+
+            LOGI(TAG, timeout_ms);
         }
         delay1ms(1U);
     }
@@ -674,9 +891,14 @@ en_result_t sx1278_read_packet(uint8_t* buf, uint16_t const len, uint16_t* actua
 
     LOGI(TAG, 3);
 
+    LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS1));
+    LOGI(TAG, sx1278_read_reg(REG_IRQ_FLAGS2));
     //После чтения сбросить флаг IRQ2_PAYLOAD_READY
-    sx1278_write_reg(REG_IRQ_FLAGS2, IRQ2_PAYLOAD_READY);
+    //sx1278_write_reg(REG_IRQ_FLAGS2, IRQ2_PAYLOAD_READY);
     //TODO проверка успешности записи в регистр
+
+    //очистка всех флагов
+    sx1278_write_reg(REG_IRQ_FLAGS2, 0xFF);
 
     uint8_t val = sx1278_read_reg(REG_OP_MODE); 
     //контрольная проверка - конфигурация должна быть произведена
@@ -697,7 +919,9 @@ en_result_t sx1278_read_packet(uint8_t* buf, uint16_t const len, uint16_t* actua
     //TODO возможно более корректно переводить в режим стендбай, а потом возвращать в Rx
 
     //готовы принимать новый пакет
-    sx1278_write_reg(REG_RX_CONFIG, RX_TRIGGER_NONE | RX_RESTART_RX_WITHOUT_PLL_LOCK);
+    sx1278_write_reg(REG_RX_CONFIG, RX_TRIGGER_PREAMBLE_DETECT | RX_AGC_AUTO_ON | RX_AFC_AUTO_ON | RX_RESTART_RX_WITHOUT_PLL_LOCK);
+        //RX_TRIGGER_PREAMBLE_DETECT | RX_RESTART_RX_WITHOUT_PLL_LOCK | RX_AGC_AUTO_ON | RX_AFC_AUTO_ON);
+        // RX_TRIGGER_NONE | RX_RESTART_RX_WITHOUT_PLL_LOCK);
     //TODO проверка успешности записи в регистр
 
     *actual = read_len;
@@ -718,10 +942,11 @@ int8_t sx1278_get_rssi(void)
     rssi_raw = sx1278_read_reg(REG_RSSI_VALUE);
     
     // Если значение 0, возможно приемник не активен или нет сигнала (шумовой порог)
-    // Но технически 0 тоже валидное чтение, просто очень слабый сигнал.
+    // Но технически 0 тоже валидное чтение
     
     // Конвертация по формуле даташита: RSSI = -rssi_raw / 2
     // Возвращаем знаковое целое число (dBm). 
     // Пример: если raw = 60, то RSSI = -30 dBm.
     return rssi_raw >> 1;
 }
+

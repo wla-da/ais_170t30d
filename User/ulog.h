@@ -45,7 +45,9 @@ void log_write_char(char c);
 void log_write_str(char *s);
 void log_write_hex(uint8_t h);
 void log_write_u32(uint32_t value);
+void log_write_i32(int32_t value);
 void log_write_line(char level, char *tag, uint32_t value);
+
 
 /*
     Макросы логирования
