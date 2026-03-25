@@ -6,7 +6,7 @@
 3. Отладить прием реального AIS сигнала с преобразованием в NMEA 0183
 4. Измерить основные характеристики: чувствительность, потребляемая мощность и тп 
 
-### Софт
+## Софт
 1. Операционная система Ubuntu Ubuntu 24.04.3 LTS
 2. Visual Studio Code v1.108.2 с Platformio v 3.3.4
 3. [EasyEDA](https://easyeda.com/) онлайн IDE для разработки радиосхем
@@ -21,7 +21,9 @@
 
 Первичный обзор платы был приведен [здесь](https://github.com/wla-da/ais_lab_tools/blob/main/rf/README.md). В моем варианте платы используется радиочип [SX1278](https://github.com/wla-da/ais_lab_tools/blob/main/rf/datascheet/SX1278.pdf) и MCU [HC32L110C4UA](https://github.com/wla-da/ais_lab_tools/blob/main/rf/datascheet/HC32L110SeriesDatasheet_Rev2.70.pdf). 
 
+
 #### С чем предстоит разобраться?
+
 1. Понять разводку между радиочипом SX1278 и MCU HC32L110C4UA
 2. Оценить, будет ли способен MCU HC32L110C4UA "на лету" декодировать AIS поток с преобразованием в NMEA 0183
 3. Провести эксперименты по приему сигнала AIS, сделать кастомную прошивку HC32L110C4UA
@@ -34,6 +36,7 @@
 Опционально:
 * DIO5 — Mode Ready/ClkOut, состояние чипа/тактирование
 
+
 #### Фото платы крупным планом
 
 ![Board 170T30D](img/170T30D_board.png)
@@ -45,6 +48,7 @@
 
 ![Mode 170T30D](img/170T30D_modes.png)
 Рис 2. Таблица режимов работы E32-170T30D в зависимости от уровней M0 и M1
+
 
 #### Схема подключения SX1278 и MCU на плате E32 170T30D 
 
@@ -67,6 +71,7 @@
 
 
 ## Базовый алгоритм работы радиочипа
+
 1) настраиваем физический уровень (частота канала AIS, битрейт, BT и тп) 
 2) включаем пакетный режим, бит-синхронизатор в этом случае включается автоматически
 3) устанавливаем детект преамбулы для AIS (скорее 2 байта из 3х, чтобы ловило и слабые сигналы) с учетом NRZI: 0xCC 0xCC 0xCC или 0x33 0x33 0x33
@@ -105,6 +110,7 @@
 Значит, пора приступать к созданию прошивок HC32L110C4UA. Нужно подготовить среду разработки, установить и настроить toolchain, программатор и тп.
 
 Для прошивки будем использовать [OpenOCD](https://openocd.org/) - opensource ПО для отладки, прошивки и тестирования микроконтроллеров и встроенных систем через интерфейсы JTAG или SWD.
+
 
 ## Сборка патченной версии OpenOCD от [Spritetm](https://github.com/Spritetm/openocd-hc32l110) для прошивки HC32L110
 
@@ -175,6 +181,7 @@ Error: init mode failed (unable to connect to the target)
 ```
 
 ## Подключаем плату E32 170T30D к ST-link v2 
+
 1. Готовим самодельный шлейф на основе разъема PLL-1x5 1.27 мм + Dupont-провода с разъемом "мама" на одном конце
 2. Припаиваем разъем (гнездо) PBL-1x5 1.27 мм к плате E32 170T30D
 3. Подключаем шлейф к плате E32 170T30D и ST-link v2 в соответствии с SWD (Serial Wire Debug):
@@ -200,7 +207,7 @@ Error: init mode failed (unable to connect to the target)
 
 Схема подключения платы E32 170T30D к USB-UART конвертору. В моем случае конвертер на базе [FT232](https://www.chipdip.ru/product/ft232-usb-uart-board-mini-preobrazovatel-usb-uart-waveshare-9000322637). Думаю, подойдет и аналогичный USB-UART(TTL) конвертер на CH340 и подобных. Важно не забыть поставить перемычку на плате FT232 для работы с напряжением 3,3 вольта, чтобы не сжечь плату MCU:
 
-| E32 170T30D | HC32L110C4UA | FT232  | Комментарий               |
+| E32 170T30D | HC32L110C4UA | FT232       | Комментарий               |
 | ----------- | ------------ | ----------  | -----------               |
 | R  (SWD)    |  1 (P00)     | RTS         | Линия сброса MCU          |
 | VCC         |  6 (Vdd)     | 3.3V        | Напряжение питания +3.3 В |
@@ -219,7 +226,9 @@ Error: init mode failed (unable to connect to the target)
 После мозгового штурма с несколькими LLM и поиском в Google было найдено 3 способа разблокировки MCU. 
 Кратко с вольным переводом на русский о каждом способе далее.
 
+
 ### 1) Отправка спецсимволов через UART в MCU
+
 Перевод с китайского [форума](https://bbs.21ic.com/icview-2766190-2-1.html)
    
 ```
@@ -242,6 +251,7 @@ Error: init mode failed (unable to connect to the target)
 Пару альтернативных вариантов разблокировки с форума eevblog.
 
 ### 2) Использование [HcUnlock.exe](https://www.eevblog.com/forum/microcontrollers/hc32l110-complete-erase/msg5037478/#msg5037478):
+
 ```
 Инструкция по разблокировке HC32F003/HC32F005/HC32L110
 1. Некоторые пользователи блокируют SWD-порт микроконтроллера из-за неправильной работы с ним, что приводит к невозможности его повторного использования. Теперь предоставляется инструмент разблокировки, позволяющий удалить программу из микроконтроллера и сохранить его работоспособность.
@@ -265,6 +275,7 @@ MCU.RST(P00) <----> последовательный модуль. RTS/DTR
 ```
 
 ### 3) Стандартный [ISP прошивальщик (китайский)](https://www.eevblog.com/forum/microcontrollers/hc32l110-complete-erase/msg5040610/#msg5040610):
+
 ```
 Подключение к UART (USB2TTL):
 * RTS  -> P00
@@ -447,14 +458,33 @@ pyocd list
 Рис 13. Подключение MCU к ST-link v2 и USB-UART (FT232)
 
 
+### Компилятор, линковщик, полезные функции
 
-## Исследование пакетного режима
+Проверить, используется ли функция printf в файле Build/app.elf
+```bash
+arm-none-eabi-nm Build/app.elf | grep printf
+```
+
+Посмотреть занимамеый размер в файле Build/app.elf
+```bash
+arm-none-eabi-nm -S --size-sort Build/app.elf | tail -20
+
+# посмотреть занимаеый размер секций
+arm-none-eabi-size -A Build/app.elf
+
+#посмотреть информацию в хидере файла
+readelf -h Build/app.elf
+```
+
+
+## Исследование пакетного режима SX1278
+
 Детектор преамбулы выключен, так как не сможет корректно обнаружить NRZI кодированную преамбулу
-Включен бит-сихронизатор (в аппаратном режиме это делается принудтельно)
-Включен поиск синхрослова, в качестве которого используются NRZI кодированные байты преамбулы и HDLC флага
-Длина пакета фиксированная, 40-60 байт
+Включен бит-сихронизатор (в аппаратном режиме это делается принудтельно).
+Включен поиск синхрослова, в качестве которого используются NRZI кодированные байты преамбулы и HDLC флага.
+Длина пакета фиксированная, 6 байт для тестирования (генератор специально выдает короткий AIS подобный пакет, но существенно короче реального AIS сигнала).
 
-Максимум, что получилось - накапливать в FIFO мусорные байты при длине синхрослова 1-2 байт. Пробовал и в полностью ручном режиме и по срабатыванию триггера RSSI. Корретных байт принять не получилось. При увеличении длины сихрослова до трих или четерыхе байт FIFO приемника было постоянно пустое, даже при очень высоком уровне тестового сигнала около -50 дБм. В ходе серии экспериментов в FIFO стабильно начали копиться одинаковые байты, причем даже очень сильном сигнале порядка -20 -30 дБм. Возникло ощущение, что сгорел LNA или повредился сам SX1278 на плате, общение с разными LLM не давало конкретики, приходилось исследовать самостоятельно. 
+Максимум, что получилось - накапливать в FIFO мусорные байты при длине синхрослова 1-2 байт. Пробовал и в полностью ручном режиме и по срабатыванию триггера RSSI. Корретных байт принять не получилось. При увеличении длины сихрослова до трёх или четерых байт, FIFO приемника был постоянно пустым, даже при очень высоком уровне тестового сигнала около -50 дБм. В ходе серии экспериментов в FIFO стабильно начали копиться одинаковые байты, причем даже очень сильном сигнале порядка -20 -30 дБм. Возникло ощущение, что сгорел LNA или повредился сам SX1278 на плате.  Общение с разными LLM не давало конкретики, приходилось исследовать самостоятельно. 
 
 Решил проверить, что может дать в целом пакетный режим, когда работает с корректной преамбулой (без NRZI кодировки). Сформировал на тестовом генераторе HDLC фрейм с трехбайтовой преамбулой без включения NRZI и после серии настроек ряда регистров получил чувствительность порядка -105 -110 дБм. 
 
@@ -487,51 +517,21 @@ sx1278_write_reg_safe(REG_PREAMBLE_DETECT,
 
 ```
 
-Ширина полосы пропускания при этом FIR порядка 16,9 кГц (регистр REG_RX_BW 0x12), этого достаточно по формуле Карсона: BW = BR + 2\*Fdev = 9600 + 2\*2400 = 14,4 кГц. Ширина полосы AFC (регистр REG_AFC_BW 0x13) не актуальна, так как AFC выключена - должна быть примерно 1,2-1,5 раза больше RX_BW. При включении AFC результат был несколько хуже, ловило меньше тестовых пакетов. Подозреваю, на короткой преамбуле не успевал корректно отработать механизм AFC, хотя значения FEI и AFC в логах присутствовали. Ширина полосы PLL (регистр REG_PLL_LF 0x70) установлена в значение 150 кГц (PLL_BW_150_KHZ  = 0x40), но для кварца 26 МГц, подозреваю, реальная полоса будет в ~1,2 раза меньше.
+Ширина полосы пропускания при этом FIR порядка 16,9 кГц (регистр REG_RX_BW 0x12), этого достаточно по формуле Карсона: `BW = BR + 2*Fdev = 9600 + 2*2400 = 14,4 кГц`. Ширина полосы AFC (регистр REG_AFC_BW 0x13) не актуальна, так как AFC выключена - должна быть примерно 1,2-1,5 раза больше RX_BW. При включении AFC результат был несколько хуже, ловило меньше тестовых пакетов. Подозреваю, на короткой преамбуле не успевал корректно отработать механизм AFC, хотя значения FEI и AFC в логах присутствовали. Ширина полосы PLL (регистр REG_PLL_LF 0x70) установлена в значение 150 кГц (PLL_BW_150_KHZ  = 0x40), но для кварца 26 МГц, подозреваю, реальная полоса будет в ~1,2 раза меньше.
+
+По итогу получил сравнительное неплохие результаты в части стабильного распознования пакетов при чувсвительности около -100 -105 дБм без NRZI кодировки.
+
+Далее решил вернуть на генераторе NRZI кодирование, а радиочипе SX1278 изменил настройки:
+1. перевел чип в режим работы без детекции преамбулы: `sx1278_write_reg_safe(REG_PREAMBLE_DETECT, PREAMBLE_DETECT_OFF)`
+2. в настройках синхрослова указал поиск 0x33, 0x33, 0x33, 0x01 - т.е. 3 байта преамбулы и флаг HDLC в кодировке NRZI сразу в нужной полярности как выдает в эфир её мой генератор
+3. триггер запуска приема установил по превышению RSSI: `sx1278_write_reg(REG_RX_CONFIG, RX_TRIGGER_RSSI | RX_AGC_AUTO_ON)`
+4. пороговый уровень срабатывания RSSI установил на -100 дБм: `sx1278_write_reg_safe(REG_RSSI_THRESH, RSSI_THRESH_DBM << 1)`
+
+Чувствительность просела до -80 -85 дБм, а стабильность ощутимо стало хуже - появилось много невалидных пакетов, среди которых мелькали и корректные, примерно в 20% случаев. Картина в целом соответствует описанию логики работы бит-синхронизатора и механизма FEI/AFC для SX1278 для которых нужна преамбула без NRZI.
 
 
 
-## TODO Идеи улучшения
-1. Использовать TXCO кварц, отклонение частоты (дрейф и тп) должно быть меньше 1/3 частоты девиации, т.е. не больше 500-700 Гц (!)
-2. На входе узкополосный полосовой фильтр на 162 МГц
-3. Методы ЦОС: восстанавление тактирования, автоподстройка частоты (компенсация)
-4. Расширить полосу пропуская до 25 кГц - но ухудшается SNR, должен быть компромисс
-5. Использовать LNA с высоким усилением и с уровнем шума не более 1-1,5 дБ
-6. Чувствительность выше ~120-123 дБм на практике смысла не имеет: предел: -174 + 10Log(BW) = -174 + 41 = ~ -133 дБм + SNR(10-12 дБ)
-7. Улучшение антенны и фидера: лучшая согласованность, несколько антенны на разные поляризации (вертикальная/горизонтальная)  
-8. Как эксперимент - уменьшить битовую скорость с 9,6 до 4,8 кб/с, см https://community.openmqttgateway.com/t/esp32-and-sx1278-ai-thinker-ra01-and-ra02-reception/2157/1
-
-
-
-Разработка трансивера на чипе AX5043
-https://notblackmagic.com/bitsnpieces/ax5043/  (VPN)
-Можно включить вывод IQ сигнала, как аналоговой, так и цифровой форме!
-Может работать принимать/передавать AM/FM (УКВ) напрямую
-
-Although the analog baseband I/Q signals is a very cool feature, the much more exciting one is the digital I/Q mode, the so called DSPMode. This mode, as the name implies, is perfect to interface the AX5043 with a DSP where advanced digital signal processing can be implemented, like unsupported modulations. The AX5043 can even be programmed to output the baseband I/Q signals at different steps of the processing chain, or output any of the tracking variables. There are two ways of getting the digital I/Q signals, either reading them from a register over SPI or through a dedicated digital interface.
-
-Starting with the interface/access of the data, in SPI mode the register DSPMODESHREG (0x06F) should be read to get the DSPMode frame bytes (access to the framing shift register), but the better and faster way is to use the dedicated digital interface. This interface uses the DATA, DCLK, PWRAMP (or ANTSEL) and SYSCLK pins, which will act as the RX bit output, frame sync, TX bit input, and bit clock input/output, respectively. To configure these pins, their respective control registers must be programmed (in the programming manual these are the “Invalid” functions):
-
-For DATA pin: Set PINFUNCDATA (0x23) register to 0x06
-For DCLK pin: Set PINFUNCDCLK (0x22) register to 0x06
-For PWRAMP pin: Set PINFUNCPWRAMP (0x26) to 0x06 and PINFUNCANTSEL (0x25) to 0x02, or vice-versa
-For SYSCLK pin: Set PINFUNCSYSCLK (0x21) to 0x04 if the AX5043 should output the bit-clock (can also be set as bit-clock input or to output lower bit-clock)
-Now to actually enable, and set what data should be output in DSPMode, the following three hidden register must be programmed: DSPMODECFG (0x320), DSPMODESKIP1 (0x321) and DSPMODESKIP0 (0x322). The first configures the DSPMode interface, and has the following meaning for each bit:
-
-
-
-
-TODO сторожевой таймер в HC32
-Аппаратный независимый сторожевой таймер (IWDT - Independent Watchdog Timer):
-
-Как работает: Это самый надежный вариант. IWDT тактируется от собственного внутреннего RC-генератора (частота около 10 кГц), который работает независимо от основного тактирования MCU. Даже если тактовая частота процессора упадет или зависнет, IWDT продолжит тикать.
-
-Управление: Вы задаете временной интервал (например, от долей секунды до нескольких секунд). Программа должна периодически (до истечения таймера) "сбрасывать" (перезагружать) счетчик IWDT командой записи в специальный регистр. Если программа зависнет и перестанет это делать, IWDT сгенерирует аппаратный сброс всего микроконтроллера.
-
-
-
-### TODO
-Провести эксперименты по включению автоподстройки частоты (AFC)
+### Эксперименты по включению автоподстройки частоты (AFC)
 
 FEI - Frequency Error Indicator, разница между несущей частотой принятого сигнала и текущей настройкой синтезатора частоты чипа
 
@@ -560,35 +560,58 @@ bitrate - скорость передачи (9600 бод)
 Ferror - максимальная ошибка опорного генератора
 ``` 
 
+| Регистр       | Адрес | Биты               | Назначение       | 
+| -----------   | ----- | -----------------  | ----------       | 
+| RegRxConfig   | 0x0D  | AfcAutoOn (4)      | Включение AFC    |  	
+| RegRxConfig   | 0x0D  | AgcAutoOn (3)      | Включение AGC, отключает настроки усиления LNA, регистр RegLna (0x0C)   
+| RegAfcFei     | 0x1A  | AfcAutoClearOn (0) | Включение автоочистки значения AFC во время фазы автоподстройки частоты   |   
+| RegFeiMsb     | 0x1D  | FeiValue(15:8)     | Старший байт FEI со знаком (!)    | 
+| RegFeiLsb     | 0x1E  | FeiValue(7:0)      | Младший байт FEI, Frequency error = FeiValue x Fstep   |  
+| RegAfcMsb     | 0x1B  | AfcValue(15:8)     | Старший байт AFC со знаком (!)    | 
+| RegAfcLsb     | 0x1C  | AfcValue(7:0)      | Младший байт AFC, AFC = AfcValue x Fstep   |  
 
-Регистр	Адрес	Назначение	Биты
-RegRxConfig	0x0D	Включение AFC и AGC	Бит 4: AfcAutoOn 
-RegRxConfig	0x0D	Очистка AFC	Бит 2: AfcAutoClearOn 
-RegAfcBw	0x1A	Полоса пропускания для AFC	
-RegAfcMsb	0x1E	Старший байт значения AFC	Знаковое число 
-RegAfcLsb	0x1F	Младший байт значения AFC	
-RegFeiMsb	0x22	Старший байт FEI	Знаковое число 
-RegFeiLsb	0x23	Младший байт FEI	
+Как и писал выше, корректная работа аппаратного механизма расчета FEI и, далее, AFC, завязана на корректную работу бит-синхронизатора и преамбулы без NRZI (три байта 0x55 или 0xAA в зависимости от бита полярности в регистре REG_SYNC_CONFIG 0x27). 
+
+В случае приема AIS преамбула находится закодирована в NRZI и может быть представлена в эфире четырьма различными последовательностями:  0x33, 0x66, 0x99 или 0xCC. Например, так работает AIS процессор на базе CMX910.
+
+Таким образом, хотя прием валидных пакетов AIS и осуществляется, но стабильность приема даже в тестовых условиях не очень хорошая. Сюда же накладываются ограничения из за множества различных комбиниаций преамбулы, а чип может обнаруживать только одно синхрослово. Да, можно делать периодическое сканирование эфира с разными значениями синхрослова или искать параллельно полностью на MCU
+Но остаются вопросы нестабильной работы механизма AFC (особенно актуальны для узкополосного AIS сигнала) и, как следствие, сниженной чувствительности приемника и пропуска пакетов. Поэтому реализовываь полноценный AIS приемник на данном чипе считаю нецелесообразным.
 
 
+## TODO Идеи улучшения
 
-### Компилятор, линковщик, полезные функции
+1. Использовать TXCO кварц, отклонение частоты (дрейф и тп) должно быть меньше 1/3 частоты девиации, т.е. не больше 500-700 Гц (!)
+2. На входе узкополосный полосовой фильтр на 162 МГц
+3. Методы ЦОС: восстанавление тактирования, автоподстройка частоты (компенсация)
+4. Расширить полосу пропуская до 25 кГц - но ухудшается SNR, должен быть компромисс
+5. Использовать LNA с высоким усилением и с уровнем шума не более 1-1,5 дБ
+6. Чувствительность выше ~120-123 дБм на практике смысла не имеет: предел: -174 + 10Log(BW) = -174 + 41 = ~ -133 дБм + SNR(10-12 дБ)
+7. Улучшение антенны и фидера: лучшая согласованность, несколько антенны на разные поляризации (вертикальная/горизонтальная)  
+8. Как эксперимент - уменьшить битовую скорость с 9,6 до 4,8 кб/с, см https://community.openmqttgateway.com/t/esp32-and-sx1278-ai-thinker-ra01-and-ra02-reception/2157/1
+9. Добавить сторожевой таймер в HC32
+Аппаратный независимый сторожевой таймер (IWDT - Independent Watchdog Timer):
 
-Проверить, используется ли функция printf в файле Build/app.elf
-```bash
-arm-none-eabi-nm Build/app.elf | grep printf
-```
+Как работает: Это самый надежный вариант. IWDT тактируется от собственного внутреннего RC-генератора (частота около 10 кГц), который работает независимо от основного тактирования MCU. Даже если тактовая частота процессора упадет или зависнет, IWDT продолжит тикать.
 
-Посмотреть занимаеый размер в файле Build/app.elf
-```bash
-arm-none-eabi-nm -S --size-sort Build/app.elf | tail -20
+Управление: задаем временной интервал (например, от долей секунды до нескольких секунд). Программа должна периодически (до истечения таймера) "сбрасывать" (перезагружать) счетчик IWDT командой записи в специальный регистр. Если программа зависнет и перестанет это делать, IWDT сгенерирует аппаратный сброс всего микроконтроллера.
 
-# посмотреть занимаеый размер секций
-arm-none-eabi-size -A Build/app.elf
 
-#посмотреть информацию в хидере файла
-readelf -h Build/app.elf
-```
+## Что дальше?
+
+Разработка трансивера на перспективном для приема AIS чипе AX5043
+https://notblackmagic.com/bitsnpieces/ax5043/  (VPN)
+Можно включить вывод IQ сигнала, как аналоговой, так и цифровой форме!
+Может работать принимать/передавать AM/FM (УКВ) напрямую
+
+Although the analog baseband I/Q signals is a very cool feature, the much more exciting one is the digital I/Q mode, the so called DSPMode. This mode, as the name implies, is perfect to interface the AX5043 with a DSP where advanced digital signal processing can be implemented, like unsupported modulations. The AX5043 can even be programmed to output the baseband I/Q signals at different steps of the processing chain, or output any of the tracking variables. There are two ways of getting the digital I/Q signals, either reading them from a register over SPI or through a dedicated digital interface.
+
+Starting with the interface/access of the data, in SPI mode the register DSPMODESHREG (0x06F) should be read to get the DSPMode frame bytes (access to the framing shift register), but the better and faster way is to use the dedicated digital interface. This interface uses the DATA, DCLK, PWRAMP (or ANTSEL) and SYSCLK pins, which will act as the RX bit output, frame sync, TX bit input, and bit clock input/output, respectively. To configure these pins, their respective control registers must be programmed (in the programming manual these are the “Invalid” functions):
+
+For DATA pin: Set PINFUNCDATA (0x23) register to 0x06
+For DCLK pin: Set PINFUNCDCLK (0x22) register to 0x06
+For PWRAMP pin: Set PINFUNCPWRAMP (0x26) to 0x06 and PINFUNCANTSEL (0x25) to 0x02, or vice-versa
+For SYSCLK pin: Set PINFUNCSYSCLK (0x21) to 0x04 if the AX5043 should output the bit-clock (can also be set as bit-clock input or to output lower bit-clock)
+Now to actually enable, and set what data should be output in DSPMode, the following three hidden register must be programmed: DSPMODECFG (0x320), DSPMODESKIP1 (0x321) and DSPMODESKIP0 (0x322). The first configures the DSPMode interface, and has the following meaning for each bit:
 
 
 ## Ссылки
