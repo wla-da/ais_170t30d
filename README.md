@@ -51,7 +51,7 @@
 **Результат**: Частично достигнута. Приём возможен, но с существенными ограничениями. Практическое применение платы E32 170T30D как качественный AIS приемник неоправданно.
 
 **Ключевые проблемы**:
-1. Чувствительность с NRZI: -80...-85 дБм (на 20-25 дБ хуже заявленной в даташите -105...-110 дБм для FSK 9600 bps)
+1. Чувствительность с NRZI в пакетном режиме: -80...-85 дБм, что на 20-25 дБ хуже заявленной в даташите -105...-110 дБм для FSK 9600 bps, единичные пакеты (порядка 5% от всех) получалось ловить на уровне -90 ..-95 дБм
 2. Без NRZI: -100...-105 дБм — ближе к ожиданиям, но AIS использует NRZI
 3. DIO пины SX1278 не подключены на плате E32 170T30D — невозможно использовать Continuous mode без перепайки
 4. Детектор преамбулы работает только с 0x55/0xAA, AIS преамбула в NRZI (три байта 0xCC или 0x33 или 0x66 или 0x99 - четыре комбинации) не детектируется аппаратно
@@ -65,7 +65,7 @@
 ## Определяемся с архитектурой
 ### Схема (частично) модуля E32 170T30D
 
-Первичный обзор платы был приведен [здесь](https://github.com/wla-da/ais_lab_tools/blob/main/rf/README.md). В моем варианте платы используется радиочип [SX1278](https://github.com/wla-da/ais_lab_tools/blob/main/rf/datascheet/SX1278.pdf) и MCU [HC32L110C4UA](https://github.com/wla-da/ais_lab_tools/blob/main/rf/datascheet/HC32L110SeriesDatasheet_Rev2.70.pdf). 
+Первичный обзор платы был приведен [здесь](https://github.com/wla-da/ais_lab_tools/blob/main/rf/README.md), [мануал](https://github.com/wla-da/ais_lab_tools/blob/main/rf/datascheet/E32-170T30D.pdf). В моем варианте платы используется радиочип [SX1278](https://github.com/wla-da/ais_lab_tools/blob/main/rf/datascheet/SX1278.pdf) и MCU [HC32L110C4UA](https://github.com/wla-da/ais_lab_tools/blob/main/rf/datascheet/HC32L110SeriesDatasheet_Rev2.70.pdf). 
 
 
 #### С чем предстоит разобраться?
